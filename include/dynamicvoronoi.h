@@ -1,24 +1,22 @@
 #ifndef _DYNAMICVORONOI_H_
 #define _DYNAMICVORONOI_H_
 
-
-#include <stdlib.h>
-#include <stdio.h>
 #include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <queue>
 
 #include "bucketedqueue.h"
 
-//! A DynamicVoronoi object computes and updates a distance map and Voronoi diagram.
+//! A DynamicVoronoi object computes and updates a distance map and Voronoi
+//! diagram.
 class DynamicVoronoi {
-
-public:
-
+ public:
   DynamicVoronoi();
   ~DynamicVoronoi();
 
   //! Initialization with an empty map
-  void initializeEmpty(int _sizeX, int _sizeY, bool initGridMap=true);
+  void initializeEmpty(int _sizeX, int _sizeY, bool initGridMap = true);
   //! Initialization with a given binary map (false==free, true==occupied)
   void initializeMap(int _sizeX, int _sizeY, bool** _gridMap);
 
@@ -30,62 +28,79 @@ public:
   void exchangeObstacles(std::vector<INTPOINT>& newObstacles);
 
   //! update distance map and Voronoi diagram to reflect the changes
-  void update(bool updateRealDist=true);
+  void update(bool updateRealDist = true);
   //! prune the Voronoi diagram
   void prune();
-  //! prune the Voronoi diagram by globally revisiting all Voronoi nodes. Takes more time but gives a more sparsely pruned Voronoi graph. You need to call this after every call to udpate()
+  //! prune the Voronoi diagram by globally revisiting all Voronoi nodes. Takes
+  //! more time but gives a more sparsely pruned Voronoi graph. You need to call
+  //! this after every call to udpate()
   void updateAlternativePrunedDiagram();
-  //! retrieve the alternatively pruned diagram. see updateAlternativePrunedDiagram()
-  int** alternativePrunedDiagram(){
-    return alternativeDiagram_;
-  };
+  //! retrieve the alternatively pruned diagram. see
+  //! updateAlternativePrunedDiagram()
+  int** alternativePrunedDiagram() { return alternativeDiagram_; };
   //! retrieve the number of neighbors that are Voronoi nodes (4-connected)
   int getNumVoronoiNeighborsAlternative(int x, int y);
-  //! returns whether the specified cell is part of the alternatively pruned diagram. See updateAlternativePrunedDiagram.
-  bool isVoronoiAlternative( int x, int y );
+  //! returns whether the specified cell is part of the alternatively pruned
+  //! diagram. See updateAlternativePrunedDiagram.
+  bool isVoronoiAlternative(int x, int y);
 
   //! returns the obstacle distance at the specified location
-  float getDistance( int x, int y );
+  float getDistance(int x, int y);
   //! returns whether the specified cell is part of the (pruned) Voronoi graph
-  bool isVoronoi( int x, int y );
+  bool isVoronoi(int x, int y);
   //! checks whether the specficied location is occupied
   bool isOccupied(int x, int y);
   //! write the current distance map and voronoi diagram as ppm file
-  void visualize(const char* filename="result.ppm");
+  void visualize(const char* filename = "result.ppm");
 
   //! returns the horizontal size of the workspace/map
-  unsigned int getSizeX() {return sizeX_;}
+  unsigned int getSizeX() { return sizeX_; }
   //! returns the vertical size of the workspace/map
-  unsigned int getSizeY() {return sizeY_;}
+  unsigned int getSizeY() { return sizeY_; }
 
-private:
+ private:
   struct dataCell {
-    float dist;
-    char voronoi;   //State的枚举值
-    char queueing;  //QueueingState的枚举值
-    int obstX;
-    int obstY;
+    float dist;     // euclidean distance
+    char voronoi;   // State enum
+    char queueing;  // QueueingState enum
+    int obstX;      // the coordinate x of nearest obstacle
+    int obstY;      // the coordinate y of nearest obstacle
     bool needsRaise;
-    int sqdist;
+    int sqdist;  // squared euclidean distance
   };
 
-  typedef enum {voronoiKeep=-4, freeQueued = -3, voronoiRetry=-2, voronoiPrune=-1, free=0, occupied=1} State;
-  //下面这几个枚举状态没搞懂
-  typedef enum {fwNotQueued=1, fwQueued=2, fwProcessed=3, bwQueued=4, bwProcessed=1} QueueingState;
-  typedef enum {invalidObstData = SHRT_MAX/2} ObstDataState;
-  typedef enum {pruned, keep, retry} markerMatchResult;
+  // voronoi states of datacell
+  typedef enum {
+    voronoiKeep = -4,  // not need prune, just keep
+    freeQueued = -3,
+    voronoiRetry = -2,  // retry to tell whether prune or not
+    voronoiPrune = -1,  // need prune
+    free = 0,           // default value
+    occupied = 1        // obstacle occupied
+  } State;
 
-
+  // queue stats of datacell
+  typedef enum {
+    fwNotQueued = 1,  // default value
+    fwQueued = 2,     // flag to avoid duplicate elements in open_
+    fwProcessed = 3,  // Low wavefront activated to all 8 neighbors
+    bwQueued = 4,     // flag to indicate once occupied but now freed
+    // HERE:enum value all the same to fwNotQueued, they name the same meaning
+    bwProcessed = 1  // Raise wavefront activated to all 8 neighbors
+  } QueueingState;
+  typedef enum { invalidObstData = SHRT_MAX / 2 } ObstDataState;
+  typedef enum { pruned, keep, retry } markerMatchResult;
 
   // methods
   void setObstacle(int x, int y);
   void removeObstacle(int x, int y);
-  inline void checkVoro(int x, int y, int nx, int ny, dataCell& c, dataCell& nc);
+  inline void checkVoro(int x, int y, int nx, int ny, dataCell& c,
+                        dataCell& nc);
   void recheckVoro();
-  void commitAndColorize(bool updateRealDist=true);
-  inline void reviveVoroNeighbors(int &x, int &y);
+  void commitAndColorize(bool updateRealDist = true);
+  inline void reviveVoroNeighbors(int& x, int& y);
 
-  inline bool isOccupied(int &x, int &y, dataCell &c);
+  inline bool isOccupied(int& x, int& y, dataCell& c);
   inline markerMatchResult markerMatch(int x, int y);
   inline bool markerMatchAlternative(int x, int y);
   inline int getVoronoiPruneValence(int x, int y);
@@ -103,9 +118,12 @@ private:
   // maps
   int sizeY_;
   int sizeX_;
+  // cell date formed as 2D array
   dataCell** data_;
-  bool** gridMap_;          //true是被占用，false是没有被占用
-  bool allocatedGridMap_;   //是否为gridmap分配了内存的标志位
+  // original grid map indicating occupancy(1: occupied, 0: free)
+  bool** gridMap_;
+  // flag for clear gridMap_ cache
+  bool allocatedGridMap_;
 
   // parameters
   int padding_;
@@ -117,6 +135,4 @@ private:
   int** alternativeDiagram_;
 };
 
-
 #endif
-
