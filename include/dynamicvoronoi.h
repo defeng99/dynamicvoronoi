@@ -71,8 +71,8 @@ class DynamicVoronoi {
 
   // voronoi states of datacell
   typedef enum {
-    voronoiKeep = -4,  // not need prune, just keep
-    freeQueued = -3,
+    voronoiKeep = -4,   // not need prune, just keep
+    freeQueued = -3,    // tag to symbolize the added to pruneQueue_
     voronoiRetry = -2,  // retry to tell whether prune or not
     voronoiPrune = -1,  // need prune
     free = 0,           // default value

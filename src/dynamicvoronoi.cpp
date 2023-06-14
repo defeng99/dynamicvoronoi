@@ -287,8 +287,7 @@ void DynamicVoronoi::update(bool updateRealDist) {
             bool overwrite = (newSqDistance < nc.sqdist);
             if (!overwrite && newSqDistance == nc.sqdist) {
               //如果nc没有最近障碍物，或者 nc的最近障碍物消失
-              // HERE:
-              // 易出现在voroni线上的栅格:其最近障碍物可以是两边中的某一边，但恰好其中一边被删除掉了
+              // HERE: 最近障碍物有两个备选，已选其中一项恰好被删除
               if (nc.obstX == invalidObstData ||
                   !isOccupied(nc.obstX, nc.obstY, data_[nc.obstX][nc.obstY])) {
                 overwrite = true;
@@ -304,6 +303,9 @@ void DynamicVoronoi::update(bool updateRealDist) {
               nc.obstX = c.obstX;
               nc.obstY = c.obstY;
             } else {
+              // HERE:
+              // overwrite标志代表Low波是否抵达波形边界，是否继续向外扩展
+              //所谓波形边界，表示多个Low波互相接触的栅格，适合判断voronoi栅格
               checkVoro(x, y, nx, ny, c, nc);
             }
             data_[nx][ny] = nc;
@@ -382,15 +384,39 @@ void DynamicVoronoi::commitAndColorize(bool updateRealDist) {
   addList_.clear();
 }
 
+// REVIEW:
+/*
+实现一算法，同时将原始驾驶路径的左右等高线栅格坐标给梳理出来，并且实现重采样和栅格引导排序等功能：
+1. 在原始路径初始段，拿到左右两个最靠起始位置的栅格种子
+2.
+其中栅格的左右方向判断，主要依赖两个向量的叉乘：栅格与其最近障碍物构成的向量，附近原始轨迹的前行引导向量
+3. 通过左右方向判断，将栅格方位分别纳入到两个容器内，以示区分
+4. 再从种子栅格出发，遵循引导方向来采样下一个栅格方位，使其满足栅格间距的要求
+5. 在栅格采样过程中，一旦引导向量的终点离栅格更近时，需要更新引导向量
+6.
+这样一直采样下去之后，将得到左右两个有序排列的栅格序列，每个栅格序列所显示的方位坐标，可以作为粗略的车道引导线
+7.
+上述粗略引导线，将利用离散点优化算法来使其满足车辆运动学的行驶条件，并交由轨迹规划模块来进行lattice采样
+8.
+前后引导向量的航向变化趋势代表了车道的弯道趋势，可以利用该值，来自适应调节左右栅格的避让空间
+*/
+
+// 利用栅格与其最近障碍物方位形成一向量，代表着Low波的法线方向，暂记为a；
+// 将附近原始路径点与其超前点（距离和偏航角插值作为判断）形成代表原始驾驶路径的引导方向，暂记为b。
+// 通过检测两者的叉乘符号，得到左右筛选；
+
 void DynamicVoronoi::checkVoro(int x, int y, int nx, int ny, dataCell& c,
                                dataCell& nc) {
+  // HERE:剔除掉障碍物占用，并且没有被Low波更新出有效最近障碍物的栅格
   if ((c.sqdist > 1 || nc.sqdist > 1) && nc.obstX != invalidObstData) {
+    // HERE:c和nc的最近障碍物A和B，不是邻接关系才能真正判断（只有A和B分属c+nc栅格区域的不同侧，才能满足voronoi的定义！）
     if (abs(c.obstX - nc.obstX) > 1 || abs(c.obstY - nc.obstY) > 1) {
       // compute dist from x,y to obstacle of nx,ny
       int dxy_x = x - nc.obstX;
       int dxy_y = y - nc.obstY;
       int sqdxy = dxy_x * dxy_x + dxy_y * dxy_y;
       int stability_xy = sqdxy - c.sqdist;
+      //必须在栅格的最近障碍物已经寻找到之后才能去寻找voronoi图
       if (sqdxy - c.sqdist < 0) return;
 
       // compute dist from nx,ny to obstacle of x,y
@@ -398,8 +424,10 @@ void DynamicVoronoi::checkVoro(int x, int y, int nx, int ny, dataCell& c,
       int dnxy_y = ny - c.obstY;
       int sqdnxy = dnxy_x * dnxy_x + dnxy_y * dnxy_y;
       int stability_nxy = sqdnxy - nc.sqdist;
+      //同上，必须已经找到最近障碍物！
       if (sqdnxy - nc.sqdist < 0) return;
 
+      // HERE:sqdist大于2，进一步筛选掉一些狭窄通道
       // which cell is added to the Voronoi diagram?
       if (stability_xy <= stability_nxy && c.sqdist > 2) {
         if (c.voronoi != free) {
@@ -428,6 +456,7 @@ void DynamicVoronoi::reviveVoroNeighbors(int& x, int& y) {
       int ny = y + dy;
       if (ny <= 0 || ny >= sizeY_ - 1) continue;
       dataCell nc = data_[nx][ny];
+      // FIXME:此处利用voronoi标记来实现重复性剔除？
       if (nc.sqdist != INT_MAX && !nc.needsRaise &&
           (nc.voronoi == voronoiKeep || nc.voronoi == voronoiPrune)) {
         nc.voronoi = free;
@@ -760,7 +789,7 @@ int DynamicVoronoi::getNumVoronoiNeighborsAlternative(int x, int y) {
   return count;
 }
 
-//根据(x,y)邻居栅格的连接模式，判断是否要对(x,y)剪枝
+//根据(x,y)邻接栅格的连接模式，判断是否要对(x,y)剪枝
 DynamicVoronoi::markerMatchResult DynamicVoronoi::markerMatch(int x, int y) {
   // implementation of connectivity patterns
   bool f[8];
@@ -778,10 +807,8 @@ DynamicVoronoi::markerMatchResult DynamicVoronoi::markerMatch(int x, int y) {
         nx = x + dx;
         dataCell nc = data_[nx][ny];
         int v = nc.voronoi;
-        bool b =
-            (v <= free &&
-             v !=
-                 voronoiPrune);  //既不是occupied又不是voronoiPrune，即可能保留的栅格
+        //既不是occupied又不是voronoiPrune，即可能保留的栅格
+        bool b = (v <= free && v != voronoiPrune);
         f[i] = b;
         if (b) {
           voroCount++;
